@@ -1,0 +1,30 @@
+[ida]
+# IDA Pro 9.1 installation containing idalib and licensed Hex-Rays decompilers.
+install_dir = "/opt/idapro-9.1"
+
+[mcp]
+# CLIMirror deliberately accepts only this loopback endpoint.
+url = "http://127.0.0.1:13337/mcp"
+startup_timeout_seconds = 60
+request_timeout_seconds = 900
+
+[llm]
+base_url = "https://api.deepseek.com"
+api_key = ""
+model = "deepseek-v4-pro"
+timeout_seconds = 90
+max_output_tokens = 2500
+temperature = 0.0
+max_retries = 2
+
+[agents]
+max_steps = 24
+max_feedback_rounds = 2
+
+[run]
+output_dir = "output"
+run_dir = "runs"
+max_file_bytes = 100000000
+max_evidence_packages_per_binary = 250
+offline = false
+
