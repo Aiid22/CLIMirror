@@ -1,6 +1,6 @@
 # CLIMirror
 
-CLIMirror 用来从已经解包的嵌入式固件中恢复 CLI 命令与处理函数之间的对应关系。输入是一个固件目录，程序会递归查找其中的 ELF 可执行文件和共享库，调用 IDA Pro 分析字符串、交叉引用、控制流和函数调用，最后生成一个 Excel 文件。
+CLIMirror 用来从已经解包的嵌入式固件中恢复 CLI 命令与处理函数之间的对应关系。输入是一个固件目录，程序会递归查找其中的文件，调用 IDA Pro 分析字符串、交叉引用、控制流和函数调用，最后生成一个 Excel 文件。
 
 输出文件只有四列：
 
@@ -21,7 +21,7 @@ handler 地址采用 IDA 中的有效地址。像 `sub_401000` 这样的 IDA 自
 - IDA Pro 9.1 Professional
 - 与固件架构匹配的 Hex-Rays decompiler
 
-IDA 默认安装在 `/opt/idapro-9.1`。运行前需要完成 idalib 激活，并保证当前用户能够正常使用 IDA 许可证。CLIMirror 主要面向 ARM 和 MIPS 固件，但没有在代码中硬编码架构限制。
+IDA 默认安装在 `/opt/idapro-9.1`。运行前需要完成 idalib 激活，并保证当前用户能够正常使用 IDA 许可证。
 
 ## 安装
 
@@ -58,8 +58,6 @@ max_steps = 24
 max_feedback_rounds = 2
 ```
 
-`config.toml` 已加入 `.gitignore`。程序只从这个文件读取 API key，不会把密钥写入日志、证据文件或 Excel。
-
 ## 使用
 
 `--firmware` 必须是解包固件目录的绝对路径：
@@ -74,7 +72,7 @@ uv run climirror --firmware /absolute/path/to/unpacked-firmware
 output/<固件目录名>.xlsx
 ```
 
-如果没有找到通过检查的映射，程序仍会生成 Excel，只是文件中只有表头。某个 ELF 分析失败时，其错误会写入运行记录，其他文件会继续处理。
+如果没有找到通过检查的映射，程序仍会生成 Excel，只是文件中只有表头。某个文件分析失败时，其错误会写入运行记录，其他文件会继续处理。
 
 ## IDA MCP 服务
 
@@ -102,7 +100,7 @@ uv run idalib-mcp --host 127.0.0.1 --port 13337
 
 定位 Agent 负责在当前 ELF 中寻找可能的 CLI 字符串、xref、分派函数、函数指针表和注册关系。它可以调用只读 IDA MCP 工具，并把每次查询记录到 Evidence Ledger。
 
-恢复 Agent 根据定位阶段生成的证据包恢复完整命令。它不能调用 IDA，也不能选择证据包之外的 handler、命令词元或证据编号。
+恢复 Agent 根据定位阶段生成的证据包恢复完整命令。它不能选择证据包之外的 handler、命令词元或证据编号。
 
 检查 Agent 会重新查询底层证据，分别检查命令是否真实存在、handler 来源是否可靠、词元顺序是否一致，以及整条关系是否可以追溯。任何确定性检查失败都会否决结果。失败案例会以结构化负样本返回恢复 Agent，最多反馈两轮；重复失败的候选不会继续尝试。
 
