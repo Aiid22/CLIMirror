@@ -108,7 +108,7 @@ class MCPServiceManager:
             env=environment,
             stdout=self._log_stream,
             stderr=asyncio.subprocess.STDOUT,
-            start_new_session=os.name == "posix",
+            start_new_session=True,
         )
         self.owned = True
         deadline = time.monotonic() + self.config.mcp.startup_timeout_seconds
@@ -135,17 +135,11 @@ class MCPServiceManager:
         process = self.process
         if process is None or process.returncode is not None:
             return
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:  # test/development fallback; production is Ubuntu
-            process.terminate()
+        os.killpg(process.pid, signal.SIGTERM)
         try:
             await asyncio.wait_for(process.wait(), timeout=10)
         except asyncio.TimeoutError:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGKILL)
-            else:
-                process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
 
     async def close(self) -> None:

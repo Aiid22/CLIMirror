@@ -57,7 +57,6 @@ class RunConfig(BaseModel):
     run_dir: Path = Path("runs")
     max_file_bytes: int = Field(default=100_000_000, ge=1024)
     max_evidence_packages_per_binary: int = Field(default=250, ge=1, le=5000)
-    offline: bool = False
 
 
 class Config(BaseModel):
@@ -86,9 +85,9 @@ def load_config(path: Path) -> Config:
         setattr(config.run, name, (base / value).resolve() if not value.is_absolute() else value.resolve())
     if not config.ida.install_dir.is_absolute():
         config.ida.install_dir = (base / config.ida.install_dir).resolve()
-    if not config.run.offline and not config.llm.api_key.strip():
+    if not config.llm.api_key.strip():
         raise ValueError("[llm].api_key is empty in config.toml")
-    if not config.run.offline and not config.llm.base_url.startswith("https://"):
+    if not config.llm.base_url.startswith("https://"):
         raise ValueError("[llm].base_url must use HTTPS")
     return config
 

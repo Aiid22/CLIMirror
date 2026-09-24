@@ -12,7 +12,7 @@ from .config import load_config, preflight
 from .evidence import EvidenceLedger
 from .firmware import validate_firmware_root
 from .ida_client import MCPIDAClient
-from .llm import LangChainAgentRuntime, OfflineAgentRuntime
+from .llm import LangChainAgentRuntime
 from .mcp_manager import MCPServiceManager
 from .runner import prepare_run, run_firmware
 
@@ -30,7 +30,7 @@ def main() -> None:
         preflight(config)
         prepared = prepare_run(root, config)
         run_dir = prepared[0]
-        runtime = OfflineAgentRuntime() if config.run.offline else LangChainAgentRuntime(config.llm, config.agents)
+        runtime = LangChainAgentRuntime(config.llm, config.agents)
 
         async def execute() -> tuple[Path, dict]:
             async with MCPServiceManager(config, run_dir / "mcp") as manager:

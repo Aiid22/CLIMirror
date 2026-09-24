@@ -49,8 +49,8 @@ class ELFSymbolIndex:
             try:
                 self.symbols[relative_path] = read_dynsym(path)
             except Exception:
-                # IDA may still understand an unusual/truncated ELF. Cross-library
-                # recovery is disabled for this file rather than failing the run.
+                # An unreadable dynamic symbol table disables cross-library
+                # recovery for this ELF without stopping analysis of other files.
                 self.symbols[relative_path] = []
         exports: dict[str, list[tuple[str, DynamicSymbol]]] = {}
         for relative_path, symbols in self.symbols.items():

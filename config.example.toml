@@ -26,5 +26,4 @@ output_dir = "output"
 run_dir = "runs"
 max_file_bytes = 100000000
 max_evidence_packages_per_binary = 250
-offline = false
 

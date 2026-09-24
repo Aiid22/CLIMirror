@@ -8,7 +8,6 @@ from typing import Any, Protocol, Sequence, TypeVar
 from pydantic import BaseModel
 
 from .config import AgentConfig, LLMConfig
-from .models import CheckJudgment, LocalizationResult, RecoveryResponse
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -72,28 +71,4 @@ class LangChainAgentRuntime:
         if structured is None:
             raise RuntimeError(f"{agent_name} returned no structured_response")
         return structured if isinstance(structured, response_type) else response_type.model_validate(structured)
-
-
-class OfflineAgentRuntime:
-    """No-network smoke runtime. It exports nothing unless a test supplies seed data."""
-
-    async def run(
-        self,
-        *,
-        agent_name: str,
-        system_prompt: str,
-        payload: dict[str, Any],
-        response_type: type[T],
-        tools: Sequence[Any] = (),
-    ) -> T:
-        if response_type is LocalizationResult:
-            value: Any = {"packages": payload.get("seed_packages", []), "evidence_rationale": "offline seed evidence only"}
-        elif response_type is RecoveryResponse:
-            value = {"candidates": payload.get("seed_candidates", [])}
-        elif response_type is CheckJudgment:
-            passed = {"passed": True, "evidence_ids": payload.get("evidence_ids", []), "evidence_rationale": "deterministic gates passed"}
-            value = {"command": passed, "handler": passed, "structure": passed, "traceability": passed, "accepted": True, "evidence_rationale": "offline deterministic verification"}
-        else:
-            raise ValueError(f"Unsupported response type: {response_type.__name__}")
-        return response_type.model_validate(value)
 

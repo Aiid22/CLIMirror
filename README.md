@@ -1,31 +1,33 @@
 # CLIMirror
 
-CLIMirror 用来从已经解包的嵌入式固件中恢复 CLI 命令与处理函数之间的对应关系。输入是一个固件目录，程序会递归查找其中的文件，调用 IDA Pro 分析字符串、交叉引用、控制流和函数调用，最后生成一个 Excel 文件。
+**English** | [简体中文](README.zh-CN.md)
 
-输出文件只有四列：
+This repository contains the CLIMirror implementation used in our paper. We use it to recover CLI command-to-handler mappings from unpacked embedded firmware. Every exported mapping is tied to evidence that the verification stage replays through IDA.
+
+The input is an absolute path to an unpacked firmware directory. CLIMirror recursively finds ELF executables and shared libraries, analyzes them through IDA Pro, and writes one workbook named after the firmware directory. The workbook contains exactly four columns:
 
 - `Command`
 - `Handler Address and Name`
 - `Handler Relative Path`
 - `Evidence Chain`
 
-handler 地址采用 IDA 中的有效地址。像 `sub_401000` 这样的 IDA 自动命名会显示为 `[IDA auto] sub_401000`，避免让人误以为它是固件中的原始符号。Excel 单元格统一按文本写入，因此以 `=`、`+` 等字符开头的命令不会被当成公式执行。
+Handler addresses are effective addresses reported by IDA. When IDA has generated a function name such as `sub_401000`, we label it as `[IDA auto] sub_401000` instead of presenting it as an original symbol. We also write every Excel cell as text so that a command beginning with `=`, `+`, `-`, or `@` is not interpreted as a formula.
 
-## 环境
+## Environment
 
-项目面向以下环境：
+The implementation runs in the following environment:
 
 - Ubuntu 24.04
 - Python 3.12
 - `uv`
 - IDA Pro 9.1 Professional
-- 与固件架构匹配的 Hex-Rays decompiler
+- A licensed Hex-Rays decompiler for the firmware architecture
 
-IDA 默认安装在 `/opt/idapro-9.1`。运行前需要完成 idalib 激活，并保证当前用户能够正常使用 IDA 许可证。
+The default IDA directory is `/opt/idapro-9.1`. Before running CLIMirror, activate idalib for the Python installation used by `uv` and make sure the current user can open IDA without a license prompt. The paper implementation analyzes ARM and MIPS ELF firmware.
 
-## 安装
+## Installation
 
-进入项目目录后执行：
+From the project directory, run:
 
 ```bash
 uv sync --locked
@@ -33,7 +35,7 @@ cp config.example.toml config.toml
 chmod 600 config.toml
 ```
 
-然后编辑 `config.toml`。通常只需要确认 IDA 路径并填写 DeepSeek API key：
+Open `config.toml`, check the IDA path, and add the DeepSeek API key:
 
 ```toml
 [ida]
@@ -58,53 +60,57 @@ max_steps = 24
 max_feedback_rounds = 2
 ```
 
-## 使用
+We keep `config.toml` out of version control. The implementation reads the API key from this local file and does not include it in run logs, evidence records, or exported workbooks.
 
-`--firmware` 必须是解包固件目录的绝对路径：
+## Running CLIMirror
+
+Pass an absolute path to the unpacked firmware directory:
 
 ```bash
 uv run climirror --firmware /absolute/path/to/unpacked-firmware
 ```
 
-默认输出位置是：
+By default, the result is written to:
 
 ```text
-output/<固件目录名>.xlsx
+output/<firmware-directory-name>.xlsx
 ```
 
-如果没有找到通过检查的映射，程序仍会生成 Excel，只是文件中只有表头。某个文件分析失败时，其错误会写入运行记录，其他文件会继续处理。
+If one ELF cannot be analyzed, we record the error and continue with the remaining files. If no mapping passes verification, we still create the workbook with its four-column header so that an empty result is explicit rather than confused with a failed run.
 
-## IDA MCP 服务
+## IDA MCP lifecycle
 
-CLIMirror 使用 mrexodia 的 `idalib-mcp`，地址固定为：
+We use mrexodia's `idalib-mcp` supervisor at a fixed loopback endpoint:
 
 ```text
 http://127.0.0.1:13337/mcp
 ```
 
-程序启动时会先检查这个地址是否是有效的 MCP 服务。如果服务已经存在，就直接复用；如果连接被拒绝并且端口空闲，程序会启动：
+At startup, CLIMirror initializes the MCP connection, lists the available tools, and calls `idb_list`. If a valid service is already running, we reuse it. If the connection is refused and port 13337 is free, CLIMirror starts the following command without passing it through a shell:
 
 ```bash
 uv run idalib-mcp --host 127.0.0.1 --port 13337
 ```
 
-如果 13337 端口被其他程序占用，CLIMirror 会直接报错，不会结束未知进程，也不会尝试启动第二个服务。
+If the port is occupied by something that is not a compatible MCP service, we stop with an error. We do not terminate the unknown process or start a second supervisor on the same port.
 
-每个 ELF 都会先复制到本次运行目录，再通过 `idb_open` 打开。这样 IDA 产生的数据库和缓存不会写入原始固件目录。每个 IDA 工具调用都会自动携带对应的 `database` session ID，模型无法自行填写或修改它。分析结束后，程序使用 `idb_close(save=false)` 关闭本次创建的数据库会话。
+Before opening an ELF, we copy it into the current run directory. IDA databases and caches are therefore created next to the private copy rather than in the unpacked firmware tree. We open each file with headless analysis and Hex-Rays initialization enabled. Every later tool call receives the corresponding `database` session ID from our wrapper; the language model cannot supply or replace that field.
 
-如果 MCP 服务是 CLIMirror 自动启动的，任务结束后会一并关闭；如果服务在运行前已经存在，只关闭本次数据库会话，保留原有服务。
+At the end of the run, we close every database opened by CLIMirror with `idb_close(save=false)`. We terminate the supervisor only when we started it ourselves. A supervisor that existed before the run is left running.
 
-## 三个 Agent 如何协作
+## The three agents
 
-三个角色都使用 LangChain `create_agent` 构建，并使用 Pydantic 结构化输出。
+We implement all three roles with LangChain `create_agent` and use Pydantic schemas for their structured responses.
 
-定位 Agent 负责在当前 ELF 中寻找可能的 CLI 字符串、xref、分派函数、函数指针表和注册关系。它可以调用只读 IDA MCP 工具，并把每次查询记录到 Evidence Ledger。
+The **localization agent** works as a firmware reverse-engineering analyst. It queries strings, cross-references, control flow, call relations, registration sites, and function-pointer tables. It calls only the read-only IDA tools exposed by our wrapper. Each observation is assigned an evidence ID before the agent cites it.
 
-恢复 Agent 根据定位阶段生成的证据包恢复完整命令。它不能选择证据包之外的 handler、命令词元或证据编号。
+The **recovery agent** reconstructs complete and ordered commands from a localization package. It has no direct access to IDA. A command token, alias, argument placeholder, or handler is usable only when it already exists in the package.
 
-检查 Agent 会重新查询底层证据，分别检查命令是否真实存在、handler 来源是否可靠、词元顺序是否一致，以及整条关系是否可以追溯。任何确定性检查失败都会否决结果。失败案例会以结构化负样本返回恢复 Agent，最多反馈两轮；重复失败的候选不会继续尝试。
+The **verification agent** takes an adversarial role. It checks command existence, handler provenance, command structure, and end-to-end traceability separately. The outer deterministic verifier then applies the final decision. A model response cannot override a missing literal, an unsupported handler, a token-order mismatch, or a failed evidence replay.
 
-Agent 能使用的 IDA 工具被限制为只读白名单：
+Rejected candidates become structured negative examples for the recovery agent. We allow at most two feedback rounds for a package and stop when the same rejected candidate appears again.
+
+The agents access only this read-only tool set:
 
 ```text
 server_health, entity_query, find_regex, lookup_funcs, imports_query,
@@ -112,27 +118,27 @@ xrefs_to, callees, callers, basic_blocks, decompile, disasm, callgraph,
 get_string, get_bytes, get_int, get_global_value, int_convert
 ```
 
-修改数据库、执行 Python、调试和保存数据库一类的工具不会暴露给 Agent。
+We do not expose database mutation, patching, renaming, arbitrary Python execution, debugger control, or database-saving tools to the agents.
 
-三个提示词分别保存在：
+Each agent keeps its complete prompt in its own source file:
 
 - `src/climirror/agents/localization.py`
 - `src/climirror/agents/recovery.py`
 - `src/climirror/agents/verification.py`
 
-提示词包含角色设定、正确示例、拒绝示例和内部核对步骤。模型只返回结构化结果和简短的 `evidence_rationale`，不会把完整内部推理写入运行记录或 Excel。
+The prompts include the role, input contract, evidence rules, accepted examples, and rejection examples. We ask the model to examine observations, candidates, counterexamples, and evidence consistency internally. The persisted output contains only the structured conclusion and a short `evidence_rationale`; we do not store or export the model's private chain of thought.
 
-## 证据与跨库分析
+## Evidence and cross-library mappings
 
-每次 MCP 查询都会进入 Evidence Ledger，记录数据库 session、工具名称、参数、结果哈希和稳定证据 ID。Agent 只能引用已经存在的证据 ID。检查阶段会再次执行被引用的查询，并比较结果哈希；重查失败或结果发生变化时，该映射不会导出。
+We record every MCP observation in an append-only Evidence Ledger. A ledger entry contains the IDA database session, tool name, arguments, result hash, and a stable evidence ID. We accept agent output only when every cited ID is already present in the ledger. During verification, we repeat every cited query and compare its result hash with the original observation. A missing, changed, or unreplayable observation prevents export.
 
-跨共享库映射使用 `pyelftools` 读取 `.dynsym`。只有导入名称与某一个共享库的导出名称完全一致，并且 IDA 中的调用关系和目标函数查询也通过时，才会建立跨库映射。存在同名的多个导出、模糊名称匹配或缺少调用关系时，候选会被拒绝。
+For mappings that cross shared-library boundaries, we read `.dynsym` with `pyelftools`. We accept a cross-library candidate only when an imported name has one unique exact export in the firmware and the IDA-side import, call relation, and target function also agree. We reject approximate name matches, duplicate exports, and targets supported only by semantic similarity.
 
-## 运行记录
+## Run artifacts and limitations
 
-每次运行的数据保存在 `runs/` 下，其中包括固件副本、Evidence Ledger、逐文件状态、已完成结果、MCP 日志和最终汇总。相同固件和相同非敏感配置再次运行时，可以复用已经完成的文件结果。
+Run data is stored under `runs/`. It includes private ELF copies, the Evidence Ledger, per-file status, completed results, MCP logs, and a final summary. When the firmware bytes and non-secret settings are unchanged, the runner reuses completed file results.
 
-CLIMirror 的目标是尽量减少缺少证据的误报，但静态分析仍然可能漏掉运行时生成的命令、加密字符串、复杂间接调用或 IDA 无法正确恢复的控制流。因此，Excel 中的 Evidence Chain 应当作为后续人工复核的入口，而不是对固件行为的绝对证明。
+CLIMirror is a static-analysis pipeline. It exports only mappings for which the localization, recovery, deterministic verification, and evidence-replay stages all succeed. The `Evidence Chain` column records the static evidence used to accept each row and provides the route back to the corresponding IDA analysis.
 
-主要依赖包括 `langchain`、`langchain-deepseek`、`langchain-mcp-adapters`、`ida-pro-mcp`、`pydantic`、`pyelftools` 和 `openpyxl`。具体版本和 `ida-pro-mcp` Git 提交记录在 `uv.lock` 中。
+The main dependencies are `langchain`, `langchain-deepseek`, `langchain-mcp-adapters`, `ida-pro-mcp`, `pydantic`, `pyelftools`, and `openpyxl`. Exact versions, including the pinned `ida-pro-mcp` Git revision, are recorded in `uv.lock`.
 

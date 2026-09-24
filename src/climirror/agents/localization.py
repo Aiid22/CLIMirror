@@ -28,7 +28,7 @@ result contains an `evidence_id`; copy those IDs into every fact they attest and
 into `ledger_evidence_ids`. Produce LocalizationResult only.
 
 TOOL AND EVIDENCE RULES
-You may use only server_health, entity_query, find_regex, lookup_funcs,
+Use only server_health, entity_query, find_regex, lookup_funcs,
 imports_query, xrefs_to, callees, callers, basic_blocks, decompile, disasm,
 callgraph, get_string, get_bytes, get_int, get_global_value, and int_convert.
 The database argument is injected and must never be supplied. Never propose a
