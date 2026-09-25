@@ -103,21 +103,18 @@ def _ubuntu_release() -> tuple[str, str]:
     return values.get("ID", ""), values.get("VERSION_ID", "")
 
 
-def preflight(config: Config, *, check_platform: bool = True, require_ida: bool = True) -> None:
+def preflight(config: Config) -> None:
     """Fail before analysis when the supported production runtime is incomplete."""
-    if check_platform:
-        distro, version = _ubuntu_release()
-        if platform.system() != "Linux" or distro != "ubuntu" or version != "24.04":
-            raise ValueError("CLIMirror production runs require Ubuntu 24.04")
-        if platform.python_version_tuple()[:2] != ("3", "12"):
-            raise ValueError("CLIMirror requires Python 3.12")
+    distro, version = _ubuntu_release()
+    if platform.system() != "Linux" or distro != "ubuntu" or version != "24.04":
+        raise ValueError("CLIMirror production runs require Ubuntu 24.04")
+    if platform.python_version_tuple()[:2] != ("3", "12"):
+        raise ValueError("CLIMirror requires Python 3.12")
     if shutil.which("uv") is None:
         raise ValueError("uv was not found on PATH")
     parsed = urlparse(config.mcp.url)
     if (parsed.scheme, parsed.hostname, parsed.port, parsed.path) != ("http", "127.0.0.1", 13337, "/mcp"):
         raise ValueError(f"MCP endpoint must be {FIXED_MCP_URL}")
-    if not require_ida:
-        return
     directory = config.ida.install_dir.expanduser()
     if not directory.is_dir():
         raise ValueError(f"IDA installation directory not found: {directory}")

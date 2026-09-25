@@ -1,116 +1,119 @@
+<div align="center">
+
 # CLIMirror
 
-**English** | [简体中文](README.zh-CN.md)
+**CLI command → handler mappings, recovered from firmware with replayable evidence.**
 
-This repository contains the CLIMirror implementation used in our paper. We use it to recover CLI command-to-handler mappings from unpacked embedded firmware. Every exported mapping is tied to evidence that the verification stage replays through IDA.
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![IDA Pro 9.1](https://img.shields.io/badge/requires-IDA%20Pro%209.1-orange.svg)](#environment)
+[![Verification](https://img.shields.io/badge/verification-hash%20replay-purple.svg)](#evidence-ledger)
 
-The input is an absolute path to an unpacked firmware directory. CLIMirror recursively finds ELF executables and shared libraries, analyzes them through IDA Pro, and writes one workbook named after the firmware directory. The workbook contains exactly four columns:
+*Command strings are easy to grep; the function that actually handles them is not.
+CLIMirror drives three evidence-bounded agents through IDA Pro and exports only
+mappings whose full dispatch chain replays byte-for-byte.*
 
-- `Command`
-- `Handler Address and Name`
-- `Handler Relative Path`
-- `Evidence Chain`
+</div>
 
-Handler addresses are effective addresses reported by IDA. When IDA has generated a function name such as `sub_401000`, we label it as `[IDA auto] sub_401000` instead of presenting it as an original symbol. We also write every Excel cell as text so that a command beginning with `=`, `+`, `-`, or `@` is not interpreted as a formula.
+---
+
+## Why CLIMirror
+
+Text mining finds command literals but not their handlers; manual reverse
+engineering binds them slowly; unconstrained LLM agents guess. CLIMirror closes
+the gap: **localize** dispatch evidence, **recover** command literals, **verify**
+every claim against an append-only ledger.
+
+| | CLIMirror | String mining | Manual RE |
+|---|---|---|---|
+| Command → handler binding | Verified dispatch chain | Not recovered | Manual, slow |
+| LLM output trust | Evidence ledger + hash replay | — | — |
+| Cross-library handlers | Unique exact `.dynsym` match | Missed | Manual |
+| Deliverable | Four-column workbook + evidence chain | String list | Ad-hoc notes |
+
+## How it works
+
+```mermaid
+flowchart LR
+    F[Unpacked firmware] --> S[ELF discovery<br/>+ private copies]
+    S --> I[IDA MCP supervisor<br/>read-only sessions]
+    I --> L
+    subgraph L[1 · Localization]
+        L1[Dispatch evidence packages:<br/>tokens · handlers · links]
+    end
+    L --> R
+    subgraph R[2 · Recovery]
+        R1[Ordered command candidates<br/>from package literals only]
+    end
+    R --> V
+    subgraph V[3 · Verification]
+        V1[Adversarial agent +<br/>deterministic replay gates]
+    end
+    V --> X[XLSX workbook<br/>Command · Handler · Path · Evidence]
+```
+
+The code layout mirrors the paper: `agents/localization.py` ·
+`agents/recovery.py` · `agents/verification.py`.
 
 ## Environment
 
-The implementation runs in the following environment:
-
-- Ubuntu 24.04
-- Python 3.12
-- `uv`
-- IDA Pro 9.1 Professional
-- A licensed Hex-Rays decompiler for the firmware architecture
-
-The default IDA directory is `/opt/idapro-9.1`. Before running CLIMirror, activate idalib for the Python installation used by `uv` and make sure the current user can open IDA without a license prompt. The paper implementation analyzes ARM and MIPS ELF firmware.
+Ubuntu 24.04 · Python 3.12 · `uv` · IDA Pro 9.1 Professional with a licensed
+Hex-Rays decompiler for the target architecture (the paper analyzes ARM and MIPS).
+Activate `idalib` for the `uv`-managed Python and make sure IDA opens without a
+license prompt.
 
 ## Installation
 
-From the project directory, run:
-
 ```bash
 uv sync --locked
-cp config.example.toml config.toml
+cp config.example.toml config.toml   # then edit [llm].api_key
 chmod 600 config.toml
 ```
 
-Open `config.toml`, check the IDA path, and add the DeepSeek API key:
+Every key beyond `[llm].api_key` (your DeepSeek key) has a working default in
+[`config.example.toml`](config.example.toml). `config.toml` is gitignored; the
+key never enters run logs, evidence records, or exported workbooks.
 
-```toml
-[ida]
-install_dir = "/opt/idapro-9.1"
-
-[mcp]
-url = "http://127.0.0.1:13337/mcp"
-startup_timeout_seconds = 60
-request_timeout_seconds = 900
-
-[llm]
-base_url = "https://api.deepseek.com"
-api_key = "YOUR_API_KEY"
-model = "deepseek-v4-pro"
-timeout_seconds = 90
-max_output_tokens = 2500
-temperature = 0.0
-max_retries = 2
-
-[agents]
-max_steps = 24
-max_feedback_rounds = 2
-```
-
-We keep `config.toml` out of version control. The implementation reads the API key from this local file and does not include it in run logs, evidence records, or exported workbooks.
-
-## Running CLIMirror
-
-Pass an absolute path to the unpacked firmware directory:
+## Usage
 
 ```bash
 uv run climirror --firmware /absolute/path/to/unpacked-firmware
 ```
 
-By default, the result is written to:
-
-```text
-output/<firmware-directory-name>.xlsx
-```
-
-If one ELF cannot be analyzed, we record the error and continue with the remaining files. If no mapping passes verification, we still create the workbook with its four-column header so that an empty result is explicit rather than confused with a failed run.
+Writes `output/<firmware-name>.xlsx` with exactly four text columns:
+`Command`, `Handler Address and Name`, `Handler Relative Path`, `Evidence Chain`.
+IDA-generated names such as `sub_401000` are labeled `[IDA auto]`; every cell is
+written as text so commands like `=help` cannot become formulas. A binary that
+fails analysis is recorded and skipped; a run with no surviving mapping still
+emits the header-only workbook. `--verbose` enables debug logging.
 
 ## IDA MCP lifecycle
 
-We use mrexodia's `idalib-mcp` supervisor at a fixed loopback endpoint:
-
-```text
-http://127.0.0.1:13337/mcp
-```
-
-At startup, CLIMirror initializes the MCP connection, lists the available tools, and calls `idb_list`. If a valid service is already running, we reuse it. If the connection is refused and port 13337 is free, CLIMirror starts the following command without passing it through a shell:
-
-```bash
-uv run idalib-mcp --host 127.0.0.1 --port 13337
-```
-
-If the port is occupied by something that is not a compatible MCP service, we stop with an error. We do not terminate the unknown process or start a second supervisor on the same port.
-
-Before opening an ELF, we copy it into the current run directory. IDA databases and caches are therefore created next to the private copy rather than in the unpacked firmware tree. We open each file with headless analysis and Hex-Rays initialization enabled. Every later tool call receives the corresponding `database` session ID from our wrapper; the language model cannot supply or replace that field.
-
-At the end of the run, we close every database opened by CLIMirror with `idb_close(save=false)`. We terminate the supervisor only when we started it ourselves. A supervisor that existed before the run is left running.
+CLIMirror reuses mrexodia's `idalib-mcp` supervisor at the fixed loopback
+endpoint `http://127.0.0.1:13337/mcp`, or starts one itself if the port is free.
+- Each ELF is copied into the run directory first; IDA databases and caches land
+  next to the private copy, never in the firmware tree.
+- The `database` session ID is injected by CLIMirror's wrapper — the model can
+  neither supply nor replace it.
+- At shutdown every database is closed with `idb_close(save=false)`; a
+  pre-existing supervisor is left running.
 
 ## The three agents
 
-We implement all three roles with LangChain `create_agent` and use Pydantic schemas for their structured responses.
+All roles are LangChain `create_agent` graphs with Pydantic-structured output;
+each keeps its full prompt in its own source file.
 
-The **localization agent** works as a firmware reverse-engineering analyst. It queries strings, cross-references, control flow, call relations, registration sites, and function-pointer tables. It calls only the read-only IDA tools exposed by our wrapper. Each observation is assigned an evidence ID before the agent cites it.
+- **Localization** — reverse-engineering analyst: strings, xrefs, control flow,
+  pointer tables, registration sites. Read-only IDA tools only.
+- **Recovery** — reconstructs ordered command literals from one immutable
+  package. No IDA access: a token, alias, or handler is usable only if it
+  already exists in the package.
+- **Verification** — adversarial auditor over four checks (command, handler,
+  structure, traceability). A deterministic outer verifier makes the final
+  call; the model cannot override a failed gate.
 
-The **recovery agent** reconstructs complete and ordered commands from a localization package. It has no direct access to IDA. A command token, alias, argument placeholder, or handler is usable only when it already exists in the package.
-
-The **verification agent** takes an adversarial role. It checks command existence, handler provenance, command structure, and end-to-end traceability separately. The outer deterministic verifier then applies the final decision. A model response cannot override a missing literal, an unsupported handler, a token-order mismatch, or a failed evidence replay.
-
-Rejected candidates become structured negative examples for the recovery agent. We allow at most two feedback rounds for a package and stop when the same rejected candidate appears again.
-
-The agents access only this read-only tool set:
+Rejected candidates become negative few-shots for recovery (at most two
+feedback rounds per package). Agents see exactly this read-only tool set:
 
 ```text
 server_health, entity_query, find_regex, lookup_funcs, imports_query,
@@ -118,27 +121,38 @@ xrefs_to, callees, callers, basic_blocks, decompile, disasm, callgraph,
 get_string, get_bytes, get_int, get_global_value, int_convert
 ```
 
-We do not expose database mutation, patching, renaming, arbitrary Python execution, debugger control, or database-saving tools to the agents.
+No database mutation, patching, renaming, Python execution, debugger control, or
+saving is exposed. Persisted output stores the structured conclusion and a short
+`evidence_rationale` — never the model's private chain of thought.
 
-Each agent keeps its complete prompt in its own source file:
+## Evidence ledger
 
-- `src/climirror/agents/localization.py`
-- `src/climirror/agents/recovery.py`
-- `src/climirror/agents/verification.py`
-
-The prompts include the role, input contract, evidence rules, accepted examples, and rejection examples. We ask the model to examine observations, candidates, counterexamples, and evidence consistency internally. The persisted output contains only the structured conclusion and a short `evidence_rationale`; we do not store or export the model's private chain of thought.
-
-## Evidence and cross-library mappings
-
-We record every MCP observation in an append-only Evidence Ledger. A ledger entry contains the IDA database session, tool name, arguments, result hash, and a stable evidence ID. We accept agent output only when every cited ID is already present in the ledger. During verification, we repeat every cited query and compare its result hash with the original observation. A missing, changed, or unreplayable observation prevents export.
-
-For mappings that cross shared-library boundaries, we read `.dynsym` with `pyelftools`. We accept a cross-library candidate only when an imported name has one unique exact export in the firmware and the IDA-side import, call relation, and target function also agree. We reject approximate name matches, duplicate exports, and targets supported only by semantic similarity.
+Every MCP observation is recorded with its arguments, result hash, and a stable
+evidence ID. Agent output is accepted only when every cited ID exists in the
+ledger; verification repeats each cited query and compares result hashes — a
+missing, changed, or unreplayable observation blocks export. Cross-library
+candidates additionally require one unique exact `.dynsym` export plus matching
+IDA import and call evidence; approximate or duplicate matches are rejected.
 
 ## Run artifacts and limitations
 
-Run data is stored under `runs/`. It includes private ELF copies, the Evidence Ledger, per-file status, completed results, MCP logs, and a final summary. When the firmware bytes and non-secret settings are unchanged, the runner reuses completed file results.
+Run data lives under `runs/`: private ELF copies, the ledger, per-file status,
+cached results, MCP logs, and a summary. Unchanged firmware plus unchanged
+non-secret settings resume from cached results. CLIMirror is static analysis: a
+mapping is exported only when localization, recovery, deterministic
+verification, and evidence replay all succeed.
 
-CLIMirror is a static-analysis pipeline. It exports only mappings for which the localization, recovery, deterministic verification, and evidence-replay stages all succeed. The `Evidence Chain` column records the static evidence used to accept each row and provides the route back to the corresponding IDA analysis.
+Main dependencies: `langchain`, `langchain-deepseek`, `langchain-mcp-adapters`,
+`ida-pro-mcp`, `pydantic`, `pyelftools`, `openpyxl` — pinned in `uv.lock`.
 
-The main dependencies are `langchain`, `langchain-deepseek`, `langchain-mcp-adapters`, `ida-pro-mcp`, `pydantic`, `pyelftools`, and `openpyxl`. Exact versions, including the pinned `ida-pro-mcp` Git revision, are recorded in `uv.lock`.
+## Project layout
 
+```text
+src/climirror/   cli, config, runner, IDA/MCP adapters, evidence ledger, export
+src/climirror/agents/   the three role prompts and drivers
+config.example.toml     all keys with defaults
+```
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).

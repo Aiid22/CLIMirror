@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -108,8 +108,7 @@ class MCPIDAClient:
         if not database:
             raise RuntimeError(f"idb_open returned no database session ID: {str(response)[:500]}")
         session = DatabaseSession(database, relative_path, copied_path, ())
-        tools = tuple(self._bound_tools(session))
-        session = DatabaseSession(database, relative_path, copied_path, tools)
+        session = replace(session, tools=tuple(self._bound_tools(session)))
         self.sessions[database] = session
         self._by_binary[relative_path] = database
         try:
@@ -120,12 +119,6 @@ class MCPIDAClient:
             await self.close_database(database)
             raise
         return session
-
-    def session_for_binary(self, relative_path: str) -> DatabaseSession:
-        database = self._by_binary.get(relative_path)
-        if database is None:
-            raise ValueError(f"No open IDA session for {relative_path}")
-        return self.sessions[database]
 
     async def close_database(self, database: str) -> None:
         session = self.sessions.pop(database, None)

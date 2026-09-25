@@ -100,9 +100,6 @@ class EvidenceLedger:
                 return False
         return True
 
-    def snapshot(self) -> list[EvidenceObservation]:
-        return list(self._items.values())
-
 
 def validate_package_citations(package: Any, ledger: EvidenceLedger) -> None:
     """Reject fabricated IDs and facts before recovery sees a package."""

@@ -52,9 +52,9 @@ def scan_elf_files(root: Path, max_file_bytes: int) -> tuple[list[FirmwareBinary
     files: list[FirmwareBinary] = []
     skipped: list[tuple[str, str]] = []
     for parent, dirs, names in os.walk(root, followlinks=False):
-        dirs[:] = [name for name in dirs if not (Path(parent) / name).is_symlink()
-                   and not getattr(Path(parent) / name, "is_junction", lambda: False)()
-                   and (Path(parent) / name).resolve().is_relative_to(root)]
+        dirs[:] = [name for name in dirs
+                   if not (entry := Path(parent, name)).is_symlink()
+                   and entry.resolve().is_relative_to(root)]
         for name in sorted(names):
             path = Path(parent) / name
             relative = path.relative_to(root).as_posix()

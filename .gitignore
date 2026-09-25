@@ -1,0 +1,23 @@
+# Local secrets
+config.toml
+
+# Run artifacts
+runs/
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build & test artifacts
+build/
+dist/
+.pytest_cache/
+.coverage
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
